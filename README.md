@@ -1,250 +1,209 @@
 # Tavern Rats: The Reliquary Heist (LLM Edition)
 
-An interactive text adventure game powered by Large Language Models (LLMs) where you play as a tavern regular caught up in a mystery surrounding the theft of a sacred relic.
+A text adventure game implementing a Large Language Model-driven narrative system with state management, NPC interaction, and dynamic story progression.
 
-## 🎮 Game Overview
+## Technical Architecture
 
-Set in the medieval-noir town of Brinehook, you must investigate the disappearance of the Reliquary of Saint Kestrel. Navigate through a web of intrigue, smugglers, and town politics to recover the artifact and uncover the truth.
+### Core System Design
 
-### Key Features
+The game implements a turn-based text adventure engine with LLM-powered narrative generation. The architecture follows a modular design pattern with clear separation of concerns between game logic, LLM integration, and state validation.
 
-- **Dynamic NPC Interactions**: 8 unique NPCs with individual moods, locations, and secrets
-- **Branching Narrative**: Your choices affect guard alert levels, reputation, and story outcomes
-- **Exploration**: 17 interconnected locations across town, sewers, and forest
-- **Memory System**: LLM-powered conversation summarization for coherent long-term gameplay
-- **Validation System**: Ensures game state consistency and prevents invalid actions
+### State Management System
 
-## 🚀 Quick Start
+**Immutable State Architecture**: The game uses deep copying to prevent unintended state mutations. All state changes are applied through validated operations that ensure game rule compliance.
 
-### Prerequisites
+**State Structure**:
 
-- Python 3.8+
-- OpenAI API key (for LLM functionality)
+- `player`: Health, location, inventory, gold, strength
+- `flags`: Binary and numerical flags tracking game progression
+- `npc_states`: Individual NPC states including mood, location, and metadata
+- `quests`: Quest tracking with stage progression
+- `world_map`: Adjacency graph defining movement constraints
+- `events`: Chronological event log for context
+- `memory`: Short-term conversation history
+- `long_term_memory`: LLM-summarized conversation context
 
-### Installation
+### LLM Integration Framework
 
-1. **Clone the repository**
+**Dual-LLM Architecture**:
 
-   ```bash
-   git clone <repository-url>
-   cd "NPC LLM Game"
-   ```
+- Primary LLM: OpenRouter GPT-OSS-120B for narrative generation
+- Summarizer LLM: GPT-3.5-Turbo for memory compression
 
-2. **Create virtual environment**
+**LangChain Integration**:
 
-   ```bash
-   python -m venv .venv
-   # Windows
-   .venv\Scripts\activate
-   # Unix/macOS
-   source .venv/bin/activate
-   ```
+- `ConversationSummaryMemory` for context management
+- `ChatPromptTemplate` for structured prompt formatting
+- JSON-based response parsing with validation
 
-3. **Install dependencies**
+**Memory Management**:
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+- Automatic conversation summarization to maintain context within token limits
+- Rolling window of recent turns (10-turn retention)
+- Persistent long-term memory storage across game sessions
 
-4. **Set up environment variables**
-   Create a `.env` file in the project root:
+### Game Engine Components
 
-   ```
-   OPENAI_API_KEY=your_openai_api_key_here
-   ```
+**Main Loop (`main.py`)**:
 
-5. **Run the game**
-   ```bash
-   python main.py
-   ```
+- Game initialization and state loading
+- Turn processing pipeline
+- Error handling and graceful degradation
+- End condition detection
 
-## 📁 Project Structure
+**Engine Core (`engine.py`)**:
 
-```
-├── main.py              # Game entry point and main loop
-├── game.py              # Game configuration, world state, and story
-├── engine.py            # Core game logic and state management
-├── llm_interface.py     # LLM integration and memory management
-├── prompt_builder.py    # Game state snapshot generation
-├── validator.py         # Output validation and game rules
-├── utils.py             # Utility functions
-├── requirements.txt     # Python dependencies
-├── .env                 # Environment variables (create this)
-└── save.json           # Game save file (auto-generated)
-```
+- `process_turn()`: Primary turn processing function
+- `apply_changes()`: State mutation with validation
+- Integration with LLM interface and validator
 
-## 🎯 Gameplay
+**LLM Interface (`llm_interface.py`)**:
 
-### Starting the Game
+- `LLMInterface` class encapsulating API communication
+- Dual-LLM configuration and management
+- Memory context integration
+- JSON response parsing with error handling
 
-You begin in the tavern common room with:
+**Prompt Builder (`prompt_builder.py`)**:
 
-- Health: 100
-- Gold: 3
-- Empty inventory
-- Main quest: Find who stole the Reliquary of Saint Kestrel
+- `build_game_state_snapshot()`: Context generation
+- Dynamic NPC visibility filtering
+- Location-aware context assembly
+- Event history truncation
 
-### Commands
+**Validator (`validator.py`)**:
 
-The game accepts natural language input. Try commands like:
+- `validate_llm_output()`: Response validation
+- Movement constraint enforcement
+- Flag range validation
+- Change key whitelisting
 
-- `"look around"` - Examine your current location
-- `"talk to bartender"` - Interact with NPCs
-- `"go to town square"` - Move to adjacent locations
-- `"check inventory"` - View your items
-- `"ask about reliquary"` - Gather information
+### Game World Implementation
 
-### Game Mechanics
+**Location System**: 17 interconnected locations with adjacency constraints:
 
-**Movement**: Navigate through 17 interconnected locations following the world map adjacency rules.
+- Town areas (tavern, square, market, apothecary, guardhouse, chapel)
+- Underground areas (alleyway, sewers, warehouse basement)
+- Docks and forest regions
 
-**NPC System**: Each NPC has:
+**NPC System**: 8 NPCs with individual state tracking:
 
-- Location and mood tracking
-- Unique knowledge and behaviors
-- Dynamic responses based on your reputation and actions
+- Location-based presence detection
+- Mood state management
+- Interaction history tracking
+- Behavioral metadata storage
 
-**Flag System**: Tracks game progress including:
+**Quest System**: Multi-stage quest tracking with:
 
-- `guard_alert` (0-5): Town guard attention level
-- `rat_reputation` (-3 to 3): Your street credibility
-- Story progression flags and clue discovery
+- Stage progression monitoring
+- Objective completion detection
+- Failure state handling
+- Conditional branching
 
-**Win/Lose Conditions**:
+### Data Structures and Algorithms
 
-- **Win**: Recover the reliquary and escape to a safe public location
-- **Lose**: Health reaches 0 OR guard_alert reaches 5 with no leverage
+**World Representation**: Adjacency list graph for location connectivity
+**State Validation**: Whitelist-based change validation with range checking
+**Memory Compression**: LLM-based summarization for context management
+**Event Logging**: Append-only event storage with truncation
 
-## 🧠 Technical Architecture
+### Configuration System
 
-### LLM Integration
+**Game Configuration (`game.py`)**:
 
-The game uses LangChain for LLM integration with:
-
-- **Primary LLM**: OpenRouter's GPT-OSS-120B for game responses
-- **Summarizer LLM**: GPT-3.5-Turbo for conversation memory management
-- **ConversationSummaryMemory**: Maintains coherent long-term context
-
-### State Management
-
-- **Immutable State Design**: Uses deep copying to prevent unintended mutations
-- **JSON-based Saves**: Automatic state serialization to `save.json`
-- **Validation Layer**: Ensures LLM outputs follow game rules and constraints
-
-### Core Components
-
-1. **Engine (`engine.py`)**: Processes turns, applies state changes, manages game flow
-2. **LLM Interface (`llm_interface.py`)**: Handles API calls and memory management
-3. **Validator (`validator.py`)**: Enforces game rules and prevents invalid states
-4. **Prompt Builder (`prompt_builder.py`)**: Creates context snapshots for LLM
-
-## 🗺️ World Map
-
-The game world consists of 17 locations:
-
-**Town Areas**:
-
-- Tavern (common room, backroom)
-- Town Square
-- Market
-- Apothecary
-- Guardhouse
-- Chapel (steps, sanctuary, archive)
-
-**Underground**:
-
-- Alleyway
-- Sewer entrance
-- Sewer tunnels
-- Docks warehouse basement
-
-**Docks & Forest**:
-
-- Docks road
-- Docks
-- Docks warehouse
-- Forest edge
-- Forest path
-- Waystone clearing
-- Old reliquary ruins
-
-## 👥 NPC Characters
-
-1. **Mara (Bartender)**: Knows rumors, hates trouble
-2. **Grimbold (Bouncer)**: Loyal but not very bright
-3. **Sable (Traveler)**: Courier with information for sale
-4. **Voss (Hooded Figure)**: Fixer offering risky shortcuts
-5. **Captain Reyne (Guard Captain)**: Can deputize or arrest you
-6. **Elin (Scribe)**: Archivist who can decode sigils
-7. **Nim (Apothecary)**: Knows about poisons and smugglers
-8. **Krail (Smuggler Boss)**: Controls dockside operations
-
-## 🔧 Configuration
-
-### Game Settings
-
-Modify `GAME_CONFIG` in `game.py` to customize:
-
-- Story premise and tone
-- Starting player stats
-- NPC behaviors and locations
+- `GAME_CONFIG`: Central configuration dictionary
+- Starting state definition
+- NPC behavior parameters
 - World map structure
-- System prompts and LLM parameters
+- System prompts and narrative parameters
 
-### LLM Settings
+**LLM Configuration**:
 
-Adjust LLM parameters in `llm_interface.py`:
+- Model selection and parameters
+- API endpoint configuration
+- Memory management settings
+- Response formatting rules
 
-- Model selection and temperature
-- API endpoints and keys
-- Memory configuration
-- Response formatting
+### Error Handling and Validation
 
-## 🐛 Troubleshooting
+**Validation Layer**:
 
-### Common Issues
+- Response structure validation (TEXT/CHANGES format)
+- Movement constraint enforcement
+- Flag range validation (guard_alert: 0-5, rat_reputation: -3 to 3)
+- Change key whitelisting
 
-1. **API Key Errors**: Ensure your OpenAI API key is correctly set in `.env`
-2. **Memory Issues**: The game automatically summarizes conversations to manage context length
-3. **Invalid States**: The validator prevents game-breaking actions
-4. **Save Corruption**: Delete `save.json` to restart with default state
+**Error Recovery**:
 
-### Debug Mode
+- Graceful degradation on LLM failures
+- State rollback on invalid changes
+- Debug mode with full tracebacks
+- Save corruption recovery
 
-Uncomment the traceback line in `main.py` to see full error details:
+### Performance Considerations
 
-```python
-traceback.print_exc()  # Remove comment for debugging
+**Memory Management**:
+
+- Automatic summarization to prevent context overflow
+- Event history truncation (last 5 events)
+- Recent turn window management (10 turns)
+
+**State Optimization**:
+
+- Deep copying for immutability
+- JSON serialization for persistence
+- Efficient state diff application
+
+## Implementation Details
+
+### Turn Processing Pipeline
+
+1. **Context Generation**: Build game state snapshot with visible NPCs, adjacent locations, and recent events
+2. **LLM Invocation**: Send formatted prompt to primary LLM with memory context
+3. **Response Validation**: Validate JSON structure and change constraints
+4. **State Application**: Apply validated changes to game state
+5. **Memory Update**: Store turn in conversation memory and update summary
+
+### Movement System
+
+Movement is constrained by the adjacency graph defined in `world_map`. The validator ensures that location changes are only allowed between connected nodes, preventing invalid teleportation.
+
+### NPC Interaction System
+
+NPCs are dynamically filtered based on player location. Each NPC maintains individual state including mood, interaction history, and behavioral metadata that influences LLM responses.
+
+### Quest Progression
+
+Quests are tracked through stage-based progression with completion and failure states. The main quest follows a linear progression through clue discovery and investigation phases.
+
+## File Structure and Organization
+
+```
+main.py              # Entry point and main game loop
+engine.py            # Core game logic and state management
+llm_interface.py     # LLM integration and memory management
+prompt_builder.py    # Context snapshot generation
+validator.py         # Output validation and rule enforcement
+game.py              # Game configuration and world definition
+utils.py             # Utility functions
+requirements.txt     # Python dependencies
 ```
 
-## 🤝 Contributing
+## Dependencies and External APIs
 
-### Development Setup
+**Core Dependencies**:
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+- `langchain-openai`: LLM integration
+- `langchain-core`: Prompt templates and memory
+- `langchain-community`: Community LLM implementations
+- `python-dotenv`: Environment variable management
 
-### Code Style
+**External APIs**:
 
-- Follow PEP 8 guidelines
-- Use type hints where applicable
-- Document new features and functions
-- Test game state changes thoroughly
+- OpenRouter API for primary LLM access
+- OpenAI API for summarization LLM
+- Environment-based API key management
 
-## 📄 License
+## Data Persistence
 
-This project is open source. Please refer to the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- Built with LangChain for LLM integration
-- Powered by OpenAI and OpenRouter APIs
-- Inspired by classic text adventure games
-- Medieval-noir setting and original story content
-
----
-
-**Enjoy your adventure in Brinehook! Remember: trust no one, watch your back, and may Saint Kestrel's luck be with you.**
+Game state is automatically serialized to JSON format for persistence. The save system maintains complete game state including all flags, NPC states, quest progress, and memory context.
