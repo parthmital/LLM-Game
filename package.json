@@ -1,0 +1,12 @@
+{
+	"name": "llm-game",
+	"private": true,
+	"version": "0.0.0",
+	"scripts": {
+		"dev": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\dev.ps1",
+		"build": "npm --prefix Frontend run build",
+		"build:dev": "npm --prefix Frontend run build:dev",
+		"preview": "npm --prefix Frontend run preview",
+		"check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\check.ps1"
+	}
+}
