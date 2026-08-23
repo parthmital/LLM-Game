@@ -1,5 +1,7 @@
 # Text-Based NPC Dialogue Engine Using Large Language Models with Persistent Memory and Retrieval-Augmented Generation
 
+Source Code Repository: [https://github.com/parthmital/LLM-Game](https://github.com/parthmital/LLM-Game)
+
 # 1. Choosing the Research Topic
 
 ## Domain Selection and Context
@@ -221,7 +223,7 @@ The project prioritises these gaps based on practical impact and experimental fe
 
 ## Proposed Solution: The Obsidian Flask Engine
 
-The Obsidian Flask is an end-to-end game dialogue engine built with a clear layered architecture:
+The Obsidian Flask is an end-to-end game dialogue engine built with a clear layered architecture. The complete open-source codebase, test suites, and seed data are available at [https://github.com/parthmital/LLM-Game](https://github.com/parthmital/LLM-Game):
 
 - Presentation Tier: A React 18 and TypeScript 5 web interface with Tailwind CSS and Zustand stores, communicating via REST API and WebSockets.
 - Orchestration Tier: A FastAPI backend running a compiled 7-stage LangGraph turn pipeline ([build_graph](file:///d:/PARTH/FINISHED%20WORK/DEVELOPMENT/LLM-Game/Backend/graph/definition.py#L254-L294)) protected by per-session asynchronous locks.
@@ -316,221 +318,85 @@ Each player action runs through seven sequential stages managed by LangGraph:
 - State Reducer: Updates state fields in memory in under 1 millisecond per event.
 - Total Turn Time: Executes end to end in approximately 450 to 750 milliseconds, well below the 1,000 millisecond real-time budget.
 
-## Pseudo-Code 1: LangGraph Turn Orchestration Pipeline
+## Algorithmic Workflow 1: LangGraph Turn Orchestration Procedure
 
-```python
-def execute_game_turn(
-    session_id: str,
-    player_input: str,
-    active_npc_id: Optional[str],
-    world: WorldState,
-    store: EventStore,
-    embedder: Embedder,
-    memory: FAISSMemory,
-    short_term: ShortTermMemory,
-    client: GroqClient,
-    snapshot_path: Optional[Path] = None,
-    snapshot_interval: int = 16
-) -> TurnState:
-    # Stage 1: Input Normalisation
-    clean_input = player_input.strip() if player_input and player_input.strip() else "(silence)"
+The turn orchestration pipeline processes player interactions through seven sequential stages:
 
-    # Stage 2: Memory Retrieval
-    query_vec = embedder.embed(clean_input)
-    retrieved_memories = memory.search(
-        vec=query_vec,
-        top_k=6,
-        filter_location=world.player.current_location_id,
-        filter_npc=active_npc_id or ""
-    )
-    if len(retrieved_memories) < 3:
-        retrieved_memories = memory.search(vec=query_vec, top_k=6)
+1. Input Normalisation:
+   - Validate and sanitise player input text. If the input is empty or contains only whitespace, replace it with a neutral silence indicator.
 
-    # Stage 3: Structured Prompt Assembly
-    prompt = build_prompt(
-        world=world,
-        active_npc_id=active_npc_id,
-        player_input=clean_input,
-        memories=retrieved_memories,
-        history=short_term.format_for_prompt(),
-        max_chars=16384
-    )
+2. Vector Memory Retrieval:
+   - Generate a 384-dimensional dense query vector from the sanitised player input using the local sentence embedding model.
+   - Query the FAISS vector index using cosine similarity to retrieve the top 6 most relevant past interaction summaries.
+   - Filter candidate memories by current room location and active NPC identifier.
+   - If the filtered search yields fewer than 3 relevant memories, execute a secondary unconstrained search across the full session memory store.
 
-    # Stage 4: LLM Generation
-    raw_output = client.generate(
-        prompt=prompt,
-        max_tokens=4096,
-        temperature=0.35,
-        stream=False
-    )
+3. Structured Context Assembly:
+   - Compile current location details, room objects, player inventory, active NPC profile, relationship status, recent conversation turns from the short-term buffer, and retrieved long-term memories.
+   - Construct a single context-budgeted prompt enforcing JSON-formatted output within character limit boundaries.
 
-    # Stage 5: JSON Extraction & Fallback
-    parsed_dict = GroqClient.extract_json(raw_output)
-    if parsed_dict is None:
-        npc_dialogue = raw_output.strip() or "..."
-        narration = ""
-        output = None
-    else:
-        output = LLMOutput(**parsed_dict)
-        npc_dialogue = output.npc_response
-        narration = output.narration
+4. Model Inference:
+   - Dispatch the assembled prompt to the hardware-accelerated inference endpoint.
+   - Generate the response containing dialogue text, atmospheric narration, memory summary, and candidate world state mutations.
 
-    # Stage 6: Symbolic World Validation
-    turn = world.turn + 1
-    if output is not None:
-        valid_events, validation_errors = validate_and_build_events(output, world, turn)
-    else:
-        valid_events, validation_errors = [], ["JSON parsing failed"]
+5. Structured Extraction and Fallback:
+   - Parse the response string into a structured output object.
+   - If JSON parsing encounters malformed syntax, fall back safely to using the raw text as dialogue with empty mutations, preventing pipeline termination.
 
-    # Stage 7: Event Commit & Storage Update
-    active_speaker = active_npc_id or "narrator"
-    spoke_event = Event(
-        turn=turn,
-        event_type=EventType.NPC_SPOKE,
-        payload={"npc_id": active_speaker, "text": npc_dialogue}
-    )
-    store.append(spoke_event)
+6. Symbolic World Validation:
+   - Increment the session turn counter.
+   - Evaluate each proposed state mutation against world invariants (valid room adjacency, object ownership, and allowed relationship boundaries).
+   - Partition proposed mutations into approved valid events and recorded validation error logs.
 
-    for event in valid_events:
-        store.append(event)
-        world = apply_event(world, event)
-    world.turn = turn
+7. Event Persistence and State Reduction:
+   - Append an NPC speech event and all approved mutation events to the SQLite atomic event store.
+   - Apply approved events sequentially to the in-memory world state using the pure event reducer.
+   - Record the interaction in the 8-turn short-term FIFO buffer.
+   - Index the generated interaction summary vector into the FAISS memory store.
+   - If the turn counter reaches a 16-turn milestone, persist a state snapshot to disk and write the updated vector index.
+   - Return the updated world state, dialogue, narration, and execution logs.
 
-    short_term.record(
-        turn=turn,
-        player_input=clean_input,
-        npc_response=npc_dialogue,
-        npc_id=active_speaker
-    )
+## Algorithmic Workflow 2: Deterministic Event Reduction Procedure
 
-    summary = output.memory_summary if output and output.memory_summary else f"Turn {turn}: {clean_input[:512]}"
-    memory.add(
-        vec=query_vec,
-        text=summary,
-        location_id=world.player.current_location_id,
-        npc_id=active_speaker,
-        turn=turn
-    )
+The state reducer functions as a pure mathematical transformation. Given the current world state and a validated event, it creates an isolated deep copy of the state and updates properties deterministically based on the event type:
 
-    if turn % snapshot_interval == 0:
-        if snapshot_path is not None:
-            save_snapshot(world, snapshot_path, store.get_last_id())
-        memory.save()
+1. Player Movement:
+   - Verify that the destination location exists within the world map.
+   - Update the player current location identifier and synchronize the world turn timestamp.
 
-    return {
-        "world": world,
-        "npc_dialogue": npc_dialogue,
-        "narration": narration,
-        "valid_events": valid_events,
-        "validation_errors": validation_errors
-    }
-```
+2. Relationship Change:
+   - Locate the target NPC relationship dictionary.
+   - Apply the numerical trust delta and clamp the updated score strictly between -100 and +100.
 
-## Pseudo-Code 2: Pure Event Reducer
+3. Object Acquisition:
+   - Clear the object world location.
+   - If acquired by the player, append the object identifier to the player inventory list.
+   - If acquired by an NPC, assign the NPC identifier as the object owner.
 
-```python
-def apply_event(state: WorldState, event: Event) -> WorldState:
-    next_state = state.model_copy(deep=True)
-    payload = event.payload
-    event_type = event.event_type
+4. Object Relinquishment:
+   - Assign the object location to the designated room.
+   - Clear object ownership and remove the item from the player inventory list.
 
-    if event_type == EventType.PLAYER_MOVED:
-        destination = payload.get("to_location_id")
-        if destination and destination in next_state.locations:
-            next_state.player.current_location_id = destination
-            next_state.turn = event.turn
+5. Location State Mutation:
+   - Update the custom key-value property dictionary for the target room.
 
-    elif event_type == EventType.RELATIONSHIP_CHANGED:
-        npc_id = payload.get("npc_id")
-        target_id = payload.get("target_id", "player")
-        delta = int(payload.get("delta", 0))
-        if npc_id and npc_id in next_state.npcs:
-            rel = next_state.relationships.setdefault(npc_id, {})
-            current = rel.get(target_id, 0)
-            rel[target_id] = max(-100, min(100, current + delta))
+6. Character State Mutation:
+   - Update NPC living status, room location, or custom state attributes.
 
-    elif event_type == EventType.OBJECT_TAKEN:
-        obj_id = payload.get("object_id")
-        taken_by = payload.get("taken_by", "player")
-        if obj_id and obj_id in next_state.objects:
-            obj = next_state.objects[obj_id]
-            obj.location_id = None
-            if taken_by == "player":
-                if obj_id not in next_state.player.inventory:
-                    next_state.player.inventory.append(obj_id)
-            else:
-                obj.owner_id = taken_by
+7. Player Flag Mutation:
+   - Store or update game progress flags in the player state dictionary.
 
-    elif event_type == EventType.OBJECT_DROPPED:
-        obj_id = payload.get("object_id")
-        loc_id = payload.get("location_id")
-        dropped_by = payload.get("dropped_by", "player")
-        if obj_id and obj_id in next_state.objects and loc_id in next_state.locations:
-            obj = next_state.objects[obj_id]
-            obj.location_id = loc_id
-            obj.owner_id = None
-            if dropped_by == "player" and obj_id in next_state.player.inventory:
-                next_state.player.inventory.remove(obj_id)
+8. Journal Entry Creation:
+   - Append an immutable narrative journal entry containing an identifier, turn number, timestamp, and text body.
 
-    elif event_type == EventType.LOCATION_STATE_CHANGED:
-        loc_id = payload.get("location_id")
-        key, value = payload.get("key"), payload.get("value")
-        if loc_id and loc_id in next_state.locations and key:
-            next_state.locations[loc_id].state[key] = value
+9. Clue Discovery:
+   - Mark an existing clue record as discovered or initialize a new discovered clue entry with its title and narrative description.
 
-    elif event_type == EventType.NPC_STATE_CHANGED:
-        npc_id = payload.get("npc_id")
-        key, value = payload.get("key"), payload.get("value")
-        if npc_id and npc_id in next_state.npcs and key:
-            npc = next_state.npcs[npc_id]
-            if key == "alive":
-                npc.alive = bool(value)
-            elif key == "location_id" and str(value) in next_state.locations:
-                npc.location_id = str(value)
-            else:
-                npc.state[key] = value
+10. Clue Linking:
+    - Establish bidirectional association links between two related clue identifiers.
 
-    elif event_type == EventType.PLAYER_FLAG_SET:
-        key = payload.get("key")
-        if key:
-            next_state.player.flags[key] = payload.get("value")
-
-    elif event_type == EventType.JOURNAL_ENTRY_CREATED:
-        entry = JournalEntry(
-            id=str(event.id or f"je_{int(event.timestamp)}"),
-            turn=event.turn,
-            content=payload.get("content", ""),
-            timestamp=event.timestamp,
-        )
-        next_state.journal.append(entry)
-
-    elif event_type == EventType.CLUE_DISCOVERED:
-        clue_id = payload.get("clue_id")
-        if clue_id:
-            if clue_id in next_state.clues:
-                next_state.clues[clue_id].discovered = True
-            else:
-                next_state.clues[clue_id] = Clue(
-                    id=clue_id,
-                    title=payload.get("title", clue_id.replace("_", " ").title()),
-                    description=payload.get("description", ""),
-                    discovered=True,
-                )
-
-    elif event_type == EventType.CLUE_LINKED:
-        id1, id2 = payload.get("id1"), payload.get("id2")
-        if id1 in next_state.clues and id2 in next_state.clues:
-            if id2 not in next_state.clues[id1].linked_clues:
-                next_state.clues[id1].linked_clues.append(id2)
-            if id1 not in next_state.clues[id2].linked_clues:
-                next_state.clues[id2].linked_clues.append(id1)
-
-    elif event_type == EventType.CURRENCY_CHANGED:
-        delta = int(payload.get("delta", 0))
-        next_state.player.currency = max(0, next_state.player.currency + delta)
-
-    return next_state
-```
+11. Currency Modification:
+    - Adjust player currency by the integer delta, enforcing a lower boundary of zero.
 
 # 11. Finding Datasets
 
